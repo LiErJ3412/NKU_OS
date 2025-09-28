@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "trap.h": "c",
+        "kmonitor.h": "c",
+        "assert.h": "c"
+    }
+}
