@@ -12,7 +12,8 @@ endif
 
 # try to infer the correct QEMU
 ifndef QEMU
-QEMU := qemu-system-riscv64
+# 使用带调试信息的 QEMU 以支持双重 GDB 调试
+QEMU := /root/Downloads/qemu-4.1.1/riscv64-softmmu/qemu-system-riscv64
 endif
 
 ifndef SPIKE

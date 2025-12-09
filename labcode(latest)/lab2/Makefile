@@ -9,8 +9,9 @@ V       := @
 GCCPREFIX := riscv64-unknown-elf-
 #endif
 
+# 使用带调试信息的 QEMU 以支持双重 GDB 调试
 ifndef QEMU
-QEMU := qemu-system-riscv64
+QEMU := /root/Downloads/qemu-4.1.1/riscv64-softmmu/qemu-system-riscv64
 endif
 
 ifndef SPIKE

@@ -218,7 +218,8 @@ int dup_mmap(struct mm_struct *to, struct mm_struct *from)
 
         insert_vma_struct(to, nvma);
 
-        bool share = 0;
+        // LAB5 COW: 启用写时复制机制
+        bool share = 1;
         if (copy_range(to->pgdir, from->pgdir, vma->vm_start, vma->vm_end, share) != 0)
         {
             return -E_NO_MEM;
@@ -381,4 +382,93 @@ bool user_mem_check(struct mm_struct *mm, uintptr_t addr, size_t len, bool write
         return 1;
     }
     return KERN_ACCESS(addr, addr + len);
+}
+
+/* do_pgfault - 页面错误异常处理函数
+ * @mm:         当前进程的mm_struct
+ * @error_code: 错误码，由硬件设置
+ * @addr:       引发页面错误的线性地址
+ *
+ * 调用关系: trap --> exception_handler --> do_pgfault
+ *
+ * 该函数主要处理两种情况:
+ * 1. 页面不存在 - 需要分配新页面
+ * 2. COW页面写入 - 需要复制页面实现写时复制
+ */
+int do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr)
+{
+    // 查找包含该地址的vma
+    struct vma_struct *vma = find_vma(mm, addr);
+    if (vma == NULL || vma->vm_start > addr)
+    {
+        cprintf("do_pgfault: 地址 0x%x 不在有效的vma范围内\n", addr);
+        return -E_INVAL;
+    }
+
+    // 获取页表项
+    pte_t *ptep = get_pte(mm->pgdir, addr, 1);
+    if (ptep == NULL)
+    {
+        cprintf("do_pgfault: 获取页表项失败\n");
+        return -E_NO_MEM;
+    }
+
+    // 情况1: 页面不存在，需要分配新页面
+    if (!(*ptep & PTE_V))
+    {
+        // 分配一个新页面
+        struct Page *page = pgdir_alloc_page(mm->pgdir, ROUNDDOWN(addr, PGSIZE),
+                                             PTE_U | PTE_R | PTE_W);
+        if (page == NULL)
+        {
+            cprintf("do_pgfault: 分配页面失败\n");
+            return -E_NO_MEM;
+        }
+        return 0;
+    }
+
+    // 情况2: COW页面写入 - 页面有效但是只读且带有COW标志
+    if ((*ptep & PTE_COW) && !(*ptep & PTE_W))
+    {
+        // 这是一个COW页面，需要进行写时复制
+        struct Page *old_page = pte2page(*ptep);
+
+        // 检查引用计数
+        if (page_ref(old_page) == 1)
+        {
+            // 只有一个进程引用此页面，直接恢复写权限即可
+            *ptep = (*ptep & ~PTE_COW) | PTE_W;
+            tlb_invalidate(mm->pgdir, addr);
+            return 0;
+        }
+
+        // 多个进程共享此页面，需要复制
+        struct Page *new_page = alloc_page();
+        if (new_page == NULL)
+        {
+            cprintf("do_pgfault: COW分配页面失败\n");
+            return -E_NO_MEM;
+        }
+
+        // 复制页面内容
+        void *src = page2kva(old_page);
+        void *dst = page2kva(new_page);
+        memcpy(dst, src, PGSIZE);
+
+        // 获取原来的权限（去掉COW标志，加上写权限）
+        uint32_t perm = (*ptep & PTE_USER & ~PTE_COW) | PTE_W;
+
+        // 建立新的映射
+        if (page_insert(mm->pgdir, new_page, ROUNDDOWN(addr, PGSIZE), perm) != 0)
+        {
+            free_page(new_page);
+            return -E_NO_MEM;
+        }
+
+        return 0;
+    }
+
+    // 其他情况：真正的页面错误
+    cprintf("do_pgfault: 未处理的页面错误，地址=0x%x, pte=0x%x\n", addr, *ptep);
+    return -E_INVAL;
 }

@@ -15,6 +15,7 @@
 #include <sched.h>
 #include <sync.h>
 #include <sbi.h>
+#include <proc.h>
 
 #define TICK_NUM 100
 
@@ -213,10 +214,42 @@ void exception_handler(struct trapframe *tf)
         cprintf("Instruction page fault\n");
         break;
     case CAUSE_LOAD_PAGE_FAULT:
-        cprintf("Load page fault\n");
+        // cprintf("Load page fault\n");
+        // LAB5 COW: 处理读页面错误
+        if (current->mm != NULL)
+        {
+            ret = do_pgfault(current->mm, 0, tf->tval);
+            if (ret == 0)
+            {
+                break;
+            }
+        }
+        cprintf("Load page fault at 0x%x\n", tf->tval);
+        if (current->mm == NULL)
+        {
+            print_trapframe(tf);
+            panic("无法处理内核态的页面错误");
+        }
+        do_exit(-E_KILLED);
         break;
     case CAUSE_STORE_PAGE_FAULT:
-        cprintf("Store/AMO page fault\n");
+        // cprintf("Store/AMO page fault\n");
+        // LAB5 COW: 处理写页面错误（COW的主要触发点）
+        if (current->mm != NULL)
+        {
+            ret = do_pgfault(current->mm, 1, tf->tval);
+            if (ret == 0)
+            {
+                break;
+            }
+        }
+        cprintf("Store page fault at 0x%x\n", tf->tval);
+        if (current->mm == NULL)
+        {
+            print_trapframe(tf);
+            panic("无法处理内核态的页面错误");
+        }
+        do_exit(-E_KILLED);
         break;
     default:
         print_trapframe(tf);
