@@ -1,10 +1,6 @@
 /*
- * COW (Copy on Write) 测试用例
- *
- * 本测试验证写时复制机制的正确性：
- * 1. fork后父子进程共享同一物理页面
- * 2. 当任一进程写入时，触发COW，创建独立副本
- * 3. 修改后父子进程的数据相互独立
+ * COW (Copy on Write) 综合测试用例
+ * 集成了功能正确性测试与地址机制验证
  */
 
 #include <stdio.h>
@@ -22,7 +18,14 @@ int main(void)
     int pid, i;
     int local_var = 200;
 
-    cprintf("COW Test: 开始测试写时复制机制\n");
+    cprintf("\n=== COW Test Start ===\n");
+    
+    // 【新增验证点 1】打印变量的虚拟地址 (VA)
+    // 这是为了配合内核日志，证明父子进程操作的是同一个虚拟地址
+    cprintf("[User] 变量地址验证:\n");
+    cprintf("   &global_var (VA) = 0x%x\n", &global_var);
+    cprintf("   &local_var  (VA) = 0x%x\n", &local_var);
+    
     cprintf("COW Test: 初始值 global_var = %d, local_var = %d\n", global_var, local_var);
 
     // 初始化大数组
@@ -40,20 +43,24 @@ int main(void)
     {
         // 子进程
         cprintf("\n[子进程] PID = %d\n", getpid());
-        cprintf("[子进程] fork后读取: global_var = %d, local_var = %d\n", global_var, local_var);
-        cprintf("[子进程] fork后读取: big_array[0] = %d, big_array[1023] = %d\n",
-                big_array[0], big_array[1023]);
+        
+        // 验证：此时还没写，内核应该还没复制物理页
+        cprintf("[子进程] fork后读取: global_var = %d\n", global_var);
 
-        // 子进程修改变量 - 这应该触发COW
-        cprintf("[子进程] 正在修改变量 (应触发COW)...\n");
+        // 【新增验证点 2】写入触发点
+        // 这里是整个 COW 机制生效的关键时刻。
+        // 如果内核里有打印日志，这里应该会出现 \"COW Copy triggered at VA: 0x...\"
+        cprintf("[子进程] >>> 准备写入 global_var (应触发内核 COW 复制)...");
         global_var = 999;
+        
+        cprintf("[子进程] >>> 准备写入 local_var (栈内存 COW)...");
         local_var = 888;
+        
+        cprintf("[子进程] >>> 准备写入 big_array (大数组 COW)...");
         big_array[0] = 12345;
         big_array[1023] = 54321;
 
         cprintf("[子进程] 修改后: global_var = %d, local_var = %d\n", global_var, local_var);
-        cprintf("[子进程] 修改后: big_array[0] = %d, big_array[1023] = %d\n",
-                big_array[0], big_array[1023]);
 
         // 让出CPU，让父进程运行
         yield();
@@ -84,19 +91,13 @@ int main(void)
         yield();
         yield();
 
-        // 父进程读取变量 - 应该仍然是原始值
+        // 父进程读取变量 - 应该仍然是原始值 (证明了内存隔离)
         cprintf("[父进程] 子进程修改后读取: global_var = %d (应为100)\n", global_var);
-        cprintf("[父进程] 子进程修改后读取: local_var = %d (应为200)\n", local_var);
-        cprintf("[父进程] 子进程修改后读取: big_array[0] = %d (应为0)\n", big_array[0]);
-        cprintf("[父进程] 子进程修改后读取: big_array[1023] = %d (应为1023)\n", big_array[1023]);
-
-        // 父进程也修改变量
+        
+        // 父进程也修改变量 (证明是对称的 COW)
         cprintf("[父进程] 正在修改变量...\n");
         global_var = 111;
         big_array[500] = 77777;
-
-        cprintf("[父进程] 修改后: global_var = %d, big_array[500] = %d\n",
-                global_var, big_array[500]);
 
         // 验证父进程的值
         if (global_var == 111 && local_var == 200 &&
@@ -107,10 +108,6 @@ int main(void)
         else
         {
             cprintf("[父进程] COW测试失败!\n");
-            cprintf("  global_var = %d (期望111)\n", global_var);
-            cprintf("  local_var = %d (期望200)\n", local_var);
-            cprintf("  big_array[0] = %d (期望0)\n", big_array[0]);
-            cprintf("  big_array[1023] = %d (期望1023)\n", big_array[1023]);
         }
 
         // 等待子进程结束
