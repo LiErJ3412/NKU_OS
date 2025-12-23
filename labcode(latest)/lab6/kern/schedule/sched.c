@@ -52,6 +52,7 @@ void sched_init(void)
 {
     list_init(&timer_list);
 
+    //sched_class = &stride_sched_class;challege1更换一下调度器即可
     sched_class = &default_sched_class;
 
     rq = &__rq;

@@ -19,6 +19,8 @@
 
 #define TICK_NUM 100
 
+extern volatile size_t ticks;
+
 static void print_ticks()
 {
     cprintf("%d ticks\n", TICK_NUM);
@@ -128,9 +130,14 @@ void interrupt_handler(struct trapframe *tf)
          *(3)当计数器加到100的时候，我们会输出一个`100ticks`表示我们触发了100次时钟中断，同时打印次数（num）加一
          * (4)判断打印次数，当打印次数为10时，调用<sbi.h>中的关机函数关机
          */
+        // YOUR CODE 2311024:
+        ticks++;
+        clock_set_next_event();
 
         // lab6: YOUR CODE  (update LAB3 steps)
         //  在时钟中断时调用调度器的 sched_class_proc_tick 函数
+        // YOUR CODE 2311990:
+        sched_class_proc_tick(current);
 
         break;
     case IRQ_H_TIMER:
