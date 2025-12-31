@@ -589,18 +589,94 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset
     uint32_t blkno = offset / SFS_BLKSIZE;          // The NO. of Rd/Wr begin block
     uint32_t nblks = endpos / SFS_BLKSIZE - blkno;  // The size of Rd/Wr blocks
 
-  //LAB8:EXERCISE1 YOUR CODE HINT: call sfs_bmap_load_nolock, sfs_rbuf, sfs_rblock,etc. read different kind of blocks in file
+  //LAB8:EXERCISE1 YOUR CODE 2311990 HINT: call sfs_bmap_load_nolock, sfs_rbuf, sfs_rblock,etc. read different kind of blocks in file
 	/*
 	 * (1) If offset isn't aligned with the first block, Rd/Wr some content from offset to the end of the first block
 	 *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_buf_op
 	 *               Rd/Wr size = (nblks != 0) ? (SFS_BLKSIZE - blkoff) : (endpos - offset)
-	 * (2) Rd/Wr aligned blocks 
+	 * (2) Rd/Wr aligned blocks
 	 *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_block_op
      * (3) If end position isn't aligned with the last block, Rd/Wr some content from begin to the (endpos % SFS_BLKSIZE) of the last block
-	 *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_buf_op	
+	 *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_buf_op
 	*/
 
-    
+    /*
+     * 文件读写的核心逻辑：
+     *
+     * 假设要读取offset=1000, len=5000的数据，块大小为4096:
+     *   - 第一块: 从1000读到4096 (读3096字节，不完整块)
+     *   - 第二块: 从4096读到8192 (读4096字节，完整块)
+     *   - 第三块: 从8192读到9096 (读904字节，不完整块)
+     *
+     * 三种情况对应下面三段代码
+     */
+
+    // (1) 处理起始位置未对齐到块边界的情况
+    // 比如offset=1000，块大小4096，那么blkoff=1000，需要先处理这个不完整的块
+    blkoff = offset % SFS_BLKSIZE;  // 计算块内偏移量
+    if (blkoff != 0) {
+        // 计算第一个块需要读写的大小
+        // 如果还有后续块，就读到块尾；否则读到endpos
+        size = (nblks != 0) ? (SFS_BLKSIZE - blkoff) : (endpos - offset);
+
+        // sfs_bmap_load_nolock: 逻辑块号 -> 物理块号
+        // blkno是逻辑块号，ino是返回的物理块号
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+            goto out;
+        }
+
+        // sfs_buf_op是sfs_rbuf或sfs_wbuf，读写块内的部分数据
+        // 参数: sfs, buf, 读写长度, 物理块号, 块内偏移
+        if ((ret = sfs_buf_op(sfs, buf, size, ino, blkoff)) != 0) {
+            goto out;
+        }
+
+        alen += size;       // 累计已读写的长度
+        buf += size;        // 移动缓冲区指针
+
+        if (nblks == 0) {   // 只有一个块，直接结束
+            goto out;
+        }
+        blkno++;            // 下一个逻辑块
+        nblks--;            // 剩余完整块数减1
+    }
+
+    // (2) 处理中间对齐的完整块，可以整块读写，效率最高
+    while (nblks > 0) {
+        // 获取物理块号
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+            goto out;
+        }
+
+        // sfs_block_op是sfs_rblock或sfs_wblock，读写整块
+        // 参数: sfs, buf, 物理块号, 块数(这里是1)
+        if ((ret = sfs_block_op(sfs, buf, ino, 1)) != 0) {
+            goto out;
+        }
+
+        alen += SFS_BLKSIZE;
+        buf += SFS_BLKSIZE;
+        blkno++;
+        nblks--;
+    }
+
+    // (3) 处理末尾未对齐的部分
+    // 比如endpos=6000，块大小4096，那么size=6000%4096=1904
+    size = endpos % SFS_BLKSIZE;
+    if (size != 0) {
+        // 获取最后一个块的物理块号
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
+            goto out;
+        }
+
+        // 从块的开头读写size字节
+        if ((ret = sfs_buf_op(sfs, buf, size, ino, 0)) != 0) {
+            goto out;
+        }
+        alen += size;
+    }
+
+
 
 out:
     *alenp = alen;

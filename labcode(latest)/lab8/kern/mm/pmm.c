@@ -462,7 +462,7 @@ int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end,
             assert(page != NULL);
             assert(npage != NULL);
             int ret = 0;
-            /* LAB5:填写你在lab5中实现的代码
+            /* LAB5:填写你在lab5中实现的代码 2311990
              * replicate content of page to npage, build the map of phy addr of
              * nage with the linear addr start
              *
@@ -480,7 +480,31 @@ int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end,
              * (3) memory copy from src_kvaddr to dst_kvaddr, size is PGSIZE
              * (4) build the map of phy addr of  nage with the linear addr start
              */
-            
+
+            /*
+             * copy_range的作用：fork时复制父进程的页面到子进程
+             *
+             * 为什么不能直接让子进程共享父进程的页面？
+             * 因为fork后父子进程的内存空间是独立的，一个进程修改不应影响另一个
+             *
+             * 为什么要用page2kva转换地址？
+             * 因为page结构体记录的是物理页面，而memcpy需要虚拟地址
+             * page2kva把物理页面转换成内核虚拟地址（内核可以访问所有物理内存）
+             */
+
+            // (1) 获取父进程页面的内核虚拟地址
+            // page是父进程的物理页面，page2kva得到内核能访问的虚拟地址
+            void *src_kvaddr = page2kva(page);
+
+            // (2) 获取子进程新分配页面的内核虚拟地址
+            void *dst_kvaddr = page2kva(npage);
+
+            // (3) 复制整个页面的内容（4KB）
+            memcpy(dst_kvaddr, src_kvaddr, PGSIZE);
+
+            // (4) 在子进程的页表中建立映射
+            // start是虚拟地址，npage是物理页面，perm是权限
+            ret = page_insert(to, npage, start, perm);
             assert(ret == 0);
         }
         start += PGSIZE;

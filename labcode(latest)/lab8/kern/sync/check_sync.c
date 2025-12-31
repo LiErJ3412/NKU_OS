@@ -179,17 +179,28 @@ void phi_test_condvar (int i) {
 
 
 void phi_take_forks_condvar(int i) {
-     down(&(mtp->mutex));
+     down(&(mtp->mutex));   // 进入管程，获取互斥锁
 //--------into routine in monitor--------------
-     // LAB7 填写你在lab7中实现的代码
+     // LAB7 YOUR CODE 2312300 填写你在lab7中实现的代码
      // I am hungry
      // try to get fork
-    state_condvar[i] = HUNGRY;
-    phi_test_condvar(i);
+
+    /*
+     * 哲学家尝试拿叉子的逻辑：
+     * 1. 设置状态为HUNGRY（我饿了）
+     * 2. 尝试拿叉子（检查左右邻居是否在吃）
+     * 3. 如果拿不到，就在自己的条件变量上等待
+     */
+    state_condvar[i] = HUNGRY;      // 声明：我饿了！
+    phi_test_condvar(i);            // 尝试拿叉子
+
+    // 如果还是HUNGRY，说明没拿到叉子，需要等待
+    // 等到邻居吃完放下叉子时会signal唤醒我
     if (state_condvar[i] == HUNGRY) {
-        cond_wait(&mtp->cv[i]);
+        cond_wait(&mtp->cv[i]);     // 等待...
     }
 //--------leave routine in monitor--------------
+    // 离开管程：把控制权交给等待的signal线程或释放互斥锁
       if(mtp->next_count>0)
          up(&(mtp->next));
       else
@@ -197,16 +208,27 @@ void phi_take_forks_condvar(int i) {
 }
 
 void phi_put_forks_condvar(int i) {
-     down(&(mtp->mutex));
+     down(&(mtp->mutex));   // 进入管程
 
 //--------into routine in monitor--------------
-     // LAB7 填写你在lab7中实现的代码
+     // LAB7 YOUR CODE 2311024 填写你在lab7中实现的代码
      // I ate over
      // test left and right neighbors
-    state_condvar[i] = THINKING;
-    phi_test_condvar(LEFT);
-    phi_test_condvar(RIGHT);
+
+    /*
+     * 哲学家放下叉子的逻辑：
+     * 1. 设置状态为THINKING（我吃完了，开始思考）
+     * 2. 检查左邻居能否吃（可能之前在等我的叉子）
+     * 3. 检查右邻居能否吃（可能之前在等我的叉子）
+     *
+     * phi_test_condvar会检查邻居是否满足进餐条件
+     * 如果满足，会调用cond_signal唤醒那个邻居
+     */
+    state_condvar[i] = THINKING;    // 我吃完了
+    phi_test_condvar(LEFT);         // 看看左邻居能不能吃
+    phi_test_condvar(RIGHT);        // 看看右邻居能不能吃
 //--------leave routine in monitor--------------
+    // 离开管程
      if(mtp->next_count>0)
         up(&(mtp->next));
      else

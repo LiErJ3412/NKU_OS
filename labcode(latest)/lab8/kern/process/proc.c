@@ -126,10 +126,10 @@ alloc_proc(void)
          *       uint32_t lab6_priority;                     // priority value (lab6 stride)
          */
 
-        //LAB8 YOUR CODE : (update LAB6 steps)
+        //LAB8 YOUR CODE 2311024: (update LAB6 steps)
         /*
          * below fields(add in LAB6) in proc_struct need to be initialized
-         *       struct files_struct * filesp;                file struct point        
+         *       struct files_struct * filesp;                file struct point
          */
         proc->state = PROC_UNINIT;
         proc->pid = -1;
@@ -146,14 +146,17 @@ alloc_proc(void)
         // lab5 add:
         proc->wait_state = 0;
         proc->cptr = proc->optr = proc->yptr = NULL;
+        // lab6 add:
         proc->rq = NULL;              // 初始化运行队列为空
         list_init(&(proc->run_link)); // 初始化运行队列的指针
         proc->time_slice = 0;
-        proc->lab6_run_pool.left = proc->lab6_run_pool.right = proc->lab6_run_pool.parent = NULL;
+        skew_heap_init(&(proc->lab6_run_pool));
         proc->lab6_stride = 0;
-        proc->lab6_priority = 0;
+        proc->lab6_priority = 1;      // 默认优先级为1，避免除零错误
+        // lab8 add:
+        proc->filesp = NULL;          // 初始化文件结构指针为NULL
 
-        
+
     }
     return proc;
 }
@@ -265,14 +268,26 @@ void proc_run(struct proc_struct *proc)
         *   lcr3():                   Modify the value of CR3 register
         *   switch_to():              Context switching between two processes
         */
-    //LAB8 YOUR CODE : (update LAB4 steps)
+    //LAB8 YOUR CODE 2311990: (update LAB4 steps)
       /*
        * below fields(add in LAB6) in proc_struct need to be initialized
        *       before switch_to();you should flush the tlb
        *        MACROs or Functions:
-       *       flush_tlb():          flush the tlb        
+       *       flush_tlb():          flush the tlb
        */
-    
+    if (proc != current)
+    {
+        bool intr_flag;
+        struct proc_struct *prev = current;
+        local_intr_save(intr_flag);
+        {
+            current = proc;
+            lsatp(current->pgdir);
+            flush_tlb();              // LAB8: 刷新TLB
+            switch_to(&(prev->context), &(proc->context));
+        }
+        local_intr_restore(intr_flag);
+    }
 }
 
 // forkret -- the first kernel entry point of a new thread/process
@@ -538,12 +553,58 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
      *    update step 1: set child proc's parent to current process, make sure current process's wait_state is 0
      *    update step 5: insert proc_struct into hash_list && proc_list, set the relation links of process
      */
-    
-    if (copy_files(clone_flags, proc) != 0)
-    { // for LAB8
+
+    // LAB8 YOUR CODE 2312300: 完整实现do_fork
+    // 1. 分配一个proc_struct
+    if ((proc = alloc_proc()) == NULL)
+    {
+        goto fork_out;
+    }
+
+    // LAB5: 设置父进程，并确保当前进程的wait_state为0
+    proc->parent = current;
+    assert(current->wait_state == 0);
+
+    // LAB6: 子进程继承父进程的stride以确保公平性
+    proc->lab6_stride = current->lab6_stride;
+
+    // 2. 分配内核栈
+    if ((ret = setup_kstack(proc)) != 0)
+    {
+        goto bad_fork_cleanup_proc;
+    }
+
+    // LAB8: 复制文件描述符表
+    if ((ret = copy_files(clone_flags, proc)) != 0)
+    {
         goto bad_fork_cleanup_kstack;
     }
-    
+
+    // 3. 复制或共享内存空间
+    if ((ret = copy_mm(clone_flags, proc)) != 0)
+    {
+        goto bad_fork_cleanup_fs;
+    }
+
+    // 4. 设置trapframe和context
+    copy_thread(proc, stack, tf);
+
+    // 5. 将proc加入hash_list和proc_list
+    bool intr_flag;
+    local_intr_save(intr_flag);
+    {
+        proc->pid = get_pid();
+        hash_proc(proc);
+        set_links(proc);
+    }
+    local_intr_restore(intr_flag);
+
+    // 6. 唤醒子进程
+    wakeup_proc(proc);
+
+    // 7. 返回子进程的pid
+    ret = proc->pid;
+
 fork_out:
     return ret;
 
@@ -641,7 +702,7 @@ load_icode_read(int fd, void *buf, size_t len, off_t offset)
 static int
 load_icode(int fd, int argc, char **kargv)
 {
-    /* LAB8:EXERCISE2 YOUR CODE  HINT:how to load the file with handler fd  in to process's memory? how to setup argc/argv?
+    /* LAB8:EXERCISE2 YOUR CODE 2312300 HINT:how to load the file with handler fd  in to process's memory? how to setup argc/argv?
      * MACROs or Functions:
      *  mm_create        - create a mm
      *  setup_pgdir      - setup pgdir in mm
@@ -650,7 +711,7 @@ load_icode(int fd, int argc, char **kargv)
      *  pgdir_alloc_page - allocate new memory for  TEXT/DATA/BSS/stack parts
      *  lsatp             - update Page Directory Addr Register -- CR3
      */
-    //You can Follow the code form LAB5 which you have completed  to complete 
+    //You can Follow the code form LAB5 which you have completed  to complete
     /* (1) create a new mm for current process
      * (2) create a new PDT, and mm->pgdir= kernel virtual addr of PDT
      * (3) copy TEXT/DATA/BSS parts in binary to memory space of process
@@ -666,7 +727,240 @@ load_icode(int fd, int argc, char **kargv)
      * (7) setup trapframe for user environment
      * (8) if up steps failed, you should cleanup the env.
      */
-    
+
+    /*
+     * load_icode的整体流程：
+     * 1. 当前进程应该没有内存空间(mm==NULL)，因为do_execve已经释放了
+     * 2. 创建新的mm和页目录表
+     * 3. 从ELF文件加载代码段、数据段
+     * 4. 设置用户栈，把argc/argv放进去
+     * 5. 设置trapframe，让进程返回用户态时跳转到程序入口
+     */
+    if (current->mm != NULL) {
+        panic("load_icode: current->mm must be empty.\n");
+    }
+
+    int ret = -E_NO_MEM;
+    struct mm_struct *mm;
+
+    // (1) 创建新的mm结构体
+    // mm_struct管理进程的虚拟内存空间，包含vma链表和页目录
+    if ((mm = mm_create()) == NULL) {
+        goto bad_mm;
+    }
+
+    // (2) 创建新的页目录表
+    // 复制内核页表，用户程序也能访问内核代码(通过syscall)
+    if (setup_pgdir(mm) != 0) {
+        goto bad_pgdir_cleanup_mm;
+    }
+
+    // (3) 解析ELF文件，加载程序段到内存
+    struct Page *page;
+    struct elfhdr __elf, *elf = &__elf;
+
+    // (3.1) 从文件读取ELF头(前52字节)
+    // ELF头包含：魔数、入口地址、程序头表偏移等信息
+    if ((ret = load_icode_read(fd, elf, sizeof(struct elfhdr), 0)) != 0) {
+        goto bad_elf_cleanup_pgdir;
+    }
+
+    // 检查ELF魔数 0x7f454c46 (0x7f E L F)
+    if (elf->e_magic != ELF_MAGIC) {
+        ret = -E_INVAL_ELF;
+        goto bad_elf_cleanup_pgdir;
+    }
+
+    // (3.2) 遍历程序头表，加载每个可加载段
+    // 程序头表描述了ELF文件中的各个段(segment)
+    struct proghdr __ph, *ph = &__ph;
+    uint32_t vm_flags, perm, phnum;
+    for (phnum = 0; phnum < elf->e_phnum; phnum++) {
+        // 计算第phnum个程序头在文件中的偏移
+        off_t phoff = elf->e_phoff + sizeof(struct proghdr) * phnum;
+        if ((ret = load_icode_read(fd, ph, sizeof(struct proghdr), phoff)) != 0) {
+            goto bad_cleanup_mmap;
+        }
+
+        // 只处理PT_LOAD类型的段（代码段、数据段等）
+        // 其他类型如PT_NOTE、PT_DYNAMIC等跳过
+        if (ph->p_type != ELF_PT_LOAD) {
+            continue;
+        }
+        // 文件大小不能超过内存大小（BSS段的memsz > filesz）
+        if (ph->p_filesz > ph->p_memsz) {
+            ret = -E_INVAL_ELF;
+            goto bad_cleanup_mmap;
+        }
+        if (ph->p_filesz == 0) {
+            // continue;  // 纯BSS段，没有文件内容
+        }
+
+        // (3.3) 设置虚拟内存区域(VMA)的标志和页表权限
+        // vm_flags用于VMA，perm用于页表项
+        vm_flags = 0;
+        perm = PTE_U | PTE_V;   // 用户态可访问 + 有效位
+        if (ph->p_flags & ELF_PF_X) vm_flags |= VM_EXEC;   // 可执行
+        if (ph->p_flags & ELF_PF_W) vm_flags |= VM_WRITE;  // 可写
+        if (ph->p_flags & ELF_PF_R) vm_flags |= VM_READ;   // 可读
+
+        // 为RISC-V设置页表权限位
+        if (vm_flags & VM_READ) perm |= PTE_R;
+        if (vm_flags & VM_WRITE) perm |= (PTE_W | PTE_R);
+        if (vm_flags & VM_EXEC) perm |= PTE_X;
+
+        if ((ret = mm_map(mm, ph->p_va, ph->p_memsz, vm_flags, NULL)) != 0) {
+            goto bad_cleanup_mmap;
+        }
+
+        // (3.4) 分配页面并从文件读取TEXT/DATA内容
+        off_t offset = ph->p_offset;
+        size_t off, size;
+        uintptr_t start = ph->p_va, end, la = ROUNDDOWN(start, PGSIZE);
+
+        ret = -E_NO_MEM;
+
+        // 复制TEXT/DATA段
+        end = ph->p_va + ph->p_filesz;
+        while (start < end) {
+            if ((page = pgdir_alloc_page(mm->pgdir, la, perm)) == NULL) {
+                ret = -E_NO_MEM;
+                goto bad_cleanup_mmap;
+            }
+            off = start - la;
+            size = PGSIZE - off;
+            la += PGSIZE;
+            if (end < la) {
+                size -= la - end;
+            }
+            // 从文件读取内容到页面
+            if ((ret = load_icode_read(fd, page2kva(page) + off, size, offset)) != 0) {
+                goto bad_cleanup_mmap;
+            }
+            start += size;
+            offset += size;
+        }
+
+        // (3.5) 处理BSS段（零填充）
+        end = ph->p_va + ph->p_memsz;
+        if (start < la) {
+            if (start == end) {
+                continue;
+            }
+            off = start + PGSIZE - la;
+            size = PGSIZE - off;
+            if (end < la) {
+                size -= la - end;
+            }
+            memset(page2kva(page) + off, 0, size);
+            start += size;
+            assert((end < la && start == end) || (end >= la && start == la));
+        }
+        while (start < end) {
+            if ((page = pgdir_alloc_page(mm->pgdir, la, perm)) == NULL) {
+                ret = -E_NO_MEM;
+                goto bad_cleanup_mmap;
+            }
+            off = start - la;
+            size = PGSIZE - off;
+            la += PGSIZE;
+            if (end < la) {
+                size -= la - end;
+            }
+            memset(page2kva(page) + off, 0, size);
+            start += size;
+        }
+    }
+
+    // 文件读完了，关闭它
+    sysfile_close(fd);
+
+    // (4) 设置用户栈
+    // 栈从USTACKTOP向下增长，大小为USTACKSIZE
+    vm_flags = VM_READ | VM_WRITE | VM_STACK;
+    if ((ret = mm_map(mm, USTACKTOP - USTACKSIZE, USTACKSIZE, vm_flags, NULL)) != 0) {
+        goto bad_cleanup_mmap;
+    }
+    // 预先分配4个物理页面作为初始栈空间
+    // 后续如果栈不够用会触发page fault，再分配
+    assert(pgdir_alloc_page(mm->pgdir, USTACKTOP - PGSIZE, PTE_USER) != NULL);
+    assert(pgdir_alloc_page(mm->pgdir, USTACKTOP - 2 * PGSIZE, PTE_USER) != NULL);
+    assert(pgdir_alloc_page(mm->pgdir, USTACKTOP - 3 * PGSIZE, PTE_USER) != NULL);
+    assert(pgdir_alloc_page(mm->pgdir, USTACKTOP - 4 * PGSIZE, PTE_USER) != NULL);
+
+    // (5) 激活新的内存空间
+    // 增加mm的引用计数，设置进程的mm和页目录
+    mm_count_inc(mm);
+    current->mm = mm;
+    current->pgdir = PADDR(mm->pgdir);
+    lsatp(PADDR(mm->pgdir));   // 切换到新页表
+
+    // (6) 在用户栈中设置argc和argv
+    // 这是与lab5最大的区别：lab8需要传递命令行参数
+    //
+    // 用户栈布局（从高地址到低地址）：
+    // USTACKTOP  ─────────────────
+    //            │  参数字符串    │  "ls\0" "-l\0" ...
+    //            ├────────────────┤
+    //            │  argv[0]指针   │  -> "ls"
+    //            │  argv[1]指针   │  -> "-l"
+    //            │  ...           │
+    //            ├────────────────┤
+    //   sp ->    │  (16字节对齐)  │
+    //            ─────────────────
+
+    // 计算所有参数字符串的总长度
+    uint32_t argv_size = 0;
+    int i;
+    for (i = 0; i < argc; i++) {
+        argv_size += strnlen(kargv[i], EXEC_MAX_ARG_LEN + 1) + 1;  // +1是'\0'
+    }
+
+    uintptr_t stacktop = USTACKTOP;
+
+    // 在栈顶下面分配参数字符串的空间，8字节对齐
+    stacktop -= (argv_size + sizeof(long) - 1) & ~(sizeof(long) - 1);
+    char *arg_str = (char *)stacktop;
+
+    // 再往下分配argv指针数组的空间
+    stacktop -= argc * sizeof(char *);
+    char **uargv = (char **)stacktop;
+
+    // 把参数字符串复制到用户栈，同时设置argv指针
+    char *p = arg_str;
+    for (i = 0; i < argc; i++) {
+        uargv[i] = strcpy(p, kargv[i]);  // strcpy返回目标地址
+        p += strnlen(kargv[i], EXEC_MAX_ARG_LEN + 1) + 1;
+    }
+
+    // RISC-V ABI要求栈指针16字节对齐
+    stacktop = stacktop & ~(uintptr_t)15;
+
+    // (7) 设置trapframe，这决定了sret后CPU的状态
+    struct trapframe *tf = current->tf;
+    memset(tf, 0, sizeof(struct trapframe));
+
+    tf->gpr.sp = stacktop;      // 用户栈指针
+    tf->epc = elf->e_entry;     // 程序入口地址（main之前的_start）
+
+    // status: 清除SPP位(返回用户态)，设置SPIE位(返回后开中断)
+    tf->status = (read_csr(sstatus) & ~SSTATUS_SPP) | SSTATUS_SPIE;
+
+    // RISC-V调用约定：a0=第一个参数(argc)，a1=第二个参数(argv)
+    tf->gpr.a0 = argc;
+    tf->gpr.a1 = (uintptr_t)uargv;
+
+    ret = 0;
+out:
+    return ret;
+bad_cleanup_mmap:
+    exit_mmap(mm);
+bad_elf_cleanup_pgdir:
+    put_pgdir(mm);
+bad_pgdir_cleanup_mm:
+    mm_destroy(mm);
+bad_mm:
+    goto out;
 }
 
 // this function isn't very correct in LAB8
