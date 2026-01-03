@@ -1,0 +1,75 @@
+make: Entering directory '/home/lierj/OSLab8/NKU_OS/labcode(latest)/lab6'
+
+OpenSBI v0.4 (Jul  2 2019 11:53:53)
+   ____                    _____ ____ _____
+  / __ \                  / ____|  _ \_   _|
+ | |  | |_ __   ___ _ __ | (___ | |_) || |
+ | |  | | '_ \ / _ \ '_ \ \___ \|  _ < | |
+ | |__| | |_) |  __/ | | |____) | |_) || |_
+  \____/| .__/ \___|_| |_|_____/|____/_____|
+        | |
+        |_|
+
+Platform Name          : QEMU Virt Machine
+Platform HART Features : RV64ACDFIMSU
+Platform Max HARTs     : 8
+Current Hart           : 0
+Firmware Base          : 0x80000000
+Firmware Size          : 112 KB
+Runtime SBI Version    : 0.1
+
+PMP0: 0x0000000080000000-0x000000008001ffff (A)
+PMP1: 0x0000000000000000-0xffffffffffffffff (A,R,W,X)
+(THU.CST) os is loading ...
+
+Special kernel symbols:
+  entry  0xc020004a (virtual)
+  etext  0xc020583e (virtual)
+  edata  0xc02cd478 (virtual)
+  end    0xc02d1958 (virtual)
+Kernel executable memory footprint: 839KB
+DTB Init
+HartID: 0
+DTB Address: 0x82200000
+Physical Memory from DTB:
+  Base: 0x0000000080000000
+  Size: 0x0000000008000000 (128 MB)
+  End:  0x0000000087ffffff
+DTB init completed
+memory management: default_pmm_manager
+physcial memory map:
+  memory: 0x08000000, [0x80000000, 0x87ffffff].
+vapaofset is 18446744070488326144
+check_alloc_page() succeeded!
+check_pgdir() succeeded!
+check_boot_pgdir() succeeded!
+use SLOB allocator
+kmalloc_init() succeeded!
+check_vma_struct() succeeded!
+check_vmm() succeeded.
+sched class: RR_scheduler
+++ setup timer interrupts
+kernel_execve: pid = 2, name = "sched_test".
+Starting quantitative analysis with 5 processes
+set priority to 5
+set priority to 2
+set priority to 4
+set priority to 1
+set priority to 3
+Child 0 (pid 3, prio 5) started at 0
+Child 1 (pid 4, prio 2) started at 50
+Child 2 (pid 5, prio 4) started at 100
+Child 3 (pid 6, prio 1) started at 150
+Child 4 (pid 7, prio 3) started at 200
+Child 3 (pid 6, prio 1) finished at 1160. RunTime: 1010
+Child 1 (pid 4, prio 2) finished at 1910. RunTime: 1860
+Child 4 (pid 7, prio 3) finished at 2720. RunTime: 2520
+Child 2 (pid 5, prio 4) finished at 3080. RunTime: 2980
+Child 0 (pid 3, prio 5) finished at 3290. RunTime: 3290
+All children finished at 3290. Total time: 3290
+all user-mode processes have quit.
+init check memory pass.
+kernel panic at kern/process/proc.c:545:
+    initproc exit.
+
+make: Leaving directory '/home/lierj/OSLab8/NKU_OS/labcode(latest)/lab6'

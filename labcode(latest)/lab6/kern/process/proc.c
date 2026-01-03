@@ -488,6 +488,7 @@ int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
     assert(current->wait_state == 0);
     // LAB6 YOUR CODE: set child's stride to parent's stride to ensure fairness
     proc->lab6_stride = current->lab6_stride;
+    proc->lab6_priority = current->lab6_priority; // Inherit priority for SJF/Stride
 
     if ((ret = setup_kstack(proc)) != 0)
     {

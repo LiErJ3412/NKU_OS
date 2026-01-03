@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <assert.h>
 #include <default_sched.h>
+#include <sched_fifo.h>
+#include <sched_sjf.h>
 
 // the list of timer
 static list_entry_t timer_list;
@@ -52,8 +54,10 @@ void sched_init(void)
 {
     list_init(&timer_list);
 
-    //sched_class = &stride_sched_class;challege1更换一下调度器即可
-    sched_class = &default_sched_class;
+    sched_class = &default_sched_class; // RR
+    // sched_class = &stride_sched_class; // Stride
+    // sched_class = &fifo_sched_class; // FIFO
+    // sched_class = &sjf_sched_class; // SJF
 
     rq = &__rq;
     rq->max_time_slice = MAX_TIME_SLICE;
